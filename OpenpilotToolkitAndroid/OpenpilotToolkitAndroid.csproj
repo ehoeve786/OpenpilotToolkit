@@ -58,6 +58,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenpilotSdk\OpenpilotSdk.csproj" />
-    <ProjectReference Include="..\SshNet.Keygen\SshNet.Keygen\SshNet.Keygen.csproj" />
+    <PackageReference Include="SshNet.Keygen" Version="2026.0.0" />
   </ItemGroup>
 </Project>

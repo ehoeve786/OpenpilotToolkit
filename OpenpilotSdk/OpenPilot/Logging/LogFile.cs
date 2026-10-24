@@ -245,10 +245,10 @@ namespace OpenpilotSdk.OpenPilot.Logging
                             speed = reader.CarState.VEgo;
                         }
 
-                        if (reader.which == Event.WHICH.LiveParameters)
+                        if (reader.which == Event.WHICH.VehicleParameters)
                         {
                             seenLiveParameters = true;
-                            roll = reader.LiveParameters.Roll;
+                            roll = reader.VehicleParameters.Roll;
                         }
 
                         if (reader.which == Event.WHICH.CarOutput)

@@ -1426,9 +1426,9 @@ namespace OpenpilotSdk.Hardware
                 var asyncResult = command.BeginExecute();
                 using (var streamReader = new StreamReader(command.ExtendedOutputStream))
                 {
-                    while (!asyncResult.IsCompleted)
+                    //Stream ends when the command's channel closes, so this exits without spinning
+                    while (await streamReader.ReadLineAsync().ConfigureAwait(false) is { } output)
                     {
-                        var output = await streamReader.ReadLineAsync().ConfigureAwait(false);
                         if (!string.IsNullOrWhiteSpace(output))
                         {
                             lastLineRead = output;
@@ -1441,9 +1441,7 @@ namespace OpenpilotSdk.Hardware
                                     if (previousProgress != currentProgress)
                                     {
                                         previousProgress = currentProgress;
-                                        var progressText = output.Substring(0, match.Index).Trim();
-                                        progressText = progressText.Remove(progressText.Length - 1);
-                                        progress.Report(new InstallProgress(currentProgress, progressText));
+                                        progress.Report(new InstallProgress(currentProgress, output[..match.Index].Trim().TrimEnd(':')));
                                     }
                                 }
                             }

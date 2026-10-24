@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  windows-app:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -25,4 +25,30 @@ jobs:
       - name: Setup and build
         run: |
           bash .agent/setup.sh
-          bash .agent/quick-build.sh
+          bash .agent/quick-build.sh 2>&1 | tee build.log
+
+      - name: Annotate build errors
+        if: failure()
+        run: grep -E ': error [A-Z]+[0-9]+' build.log | sort -u | head -50 | sed 's/^/::error::/' || true
+
+  android-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Cap'n Proto and Android workload
+        run: |
+          sudo apt-get install -y -qq capnproto
+          dotnet workload install android
+
+      - name: Build
+        run: dotnet build OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj -c Release -p:Platform=ARM64 -p:AndroidSdkDirectory="$ANDROID_HOME" 2>&1 | tee build.log
+
+      - name: Annotate build errors
+        if: failure()
+        run: grep -E ': error [A-Z]+[0-9]+' build.log | sort -u | head -50 | sed 's/^/::error::/' || true

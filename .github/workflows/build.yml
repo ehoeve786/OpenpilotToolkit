@@ -47,8 +47,14 @@ jobs:
           sudo apt-get install -y -qq capnproto
           dotnet workload install android
 
-      - name: Build
-        run: dotnet build OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj -c Release -p:Platform=ARM64 -p:AndroidSdkDirectory="$ANDROID_HOME" 2>&1 | tee build.log
+      - name: Build APK
+        run: dotnet publish OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj -c Release -f net10.0-android -p:Platform=ARM64 -p:AndroidSdkDirectory="$ANDROID_HOME" -o apk 2>&1 | tee build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenpilotToolkitAndroid-apk
+          path: apk/*-Signed.apk
+          if-no-files-found: error
 
       - name: Annotate build errors
         if: failure()

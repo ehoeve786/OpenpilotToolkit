@@ -51,7 +51,15 @@ namespace OpenpilotSdk.Hardware
         public virtual string ShutdownCommand => @"am start -n android/com.android.internal.app.ShutdownActivity";
         public virtual string FlashCommand => @"pkill -f openpilot & cd /data/openpilot/panda/board && ./recover.sh";
         public virtual string InstallEmuCommand => @"cd /data/openpilot && echo 'y' | bash <(curl -fsSL install.emu.sh) && source /data/community/.bashrc";
-        public virtual string GitCloneCommand => @"sudo systemctl stop comma || {{ echo ""ERROR: Failed to stop 'comma' service"" >&2; exit 1; }} && cd /data || {{ echo ""ERROR: Directory '/data' not found or inaccessible"" >&2; exit 1; }} && rm -rf openpilot || {{ echo ""ERROR: Failed to remove old openpilot folder"" >&2; exit 1; }} && git clone -b {1} --depth 1 --single-branch --progress --recurse-submodules --shallow-submodules https://github.com/{0}/{2}.git openpilot || {{ echo ""ERROR: Git clone failed. Check URL, branch, or network."" >&2; exit 1; }}";
+        public virtual string GitCloneCommand => @"cd /data || {{ echo ""ERROR: Directory '/data' not found or inaccessible"" >&2; exit 1; }} && rm -rf openpilot_new && git clone -b '{1}' --depth 1 --single-branch --progress --recurse-submodules --shallow-submodules 'https://github.com/{0}/{2}.git' openpilot_new || {{ rm -rf openpilot_new; echo ""ERROR: Git clone failed. Check URL, branch, or network. Existing install left untouched."" >&2; exit 1; }} && {{ sudo systemctl stop comma || {{ echo ""ERROR: Failed to stop 'comma' service"" >&2; exit 1; }}; }} && rm -rf openpilot && mv openpilot_new openpilot";
+
+        private static readonly Regex GitNameRegex = new(@"^[A-Za-z0-9._-]+$", RegexOptions.Compiled);
+        private static readonly Regex GitBranchRegex = new(@"^[A-Za-z0-9._/-]+$", RegexOptions.Compiled);
+
+        private string? BuildInstallCommand(string username, string branch, string repository) =>
+            GitNameRegex.IsMatch(username) && GitNameRegex.IsMatch(repository) && GitBranchRegex.IsMatch(branch) && !branch.StartsWith('-')
+                ? string.Format(GitCloneCommand, username, branch, repository)
+                : null;
 
         public abstract IReadOnlyDictionary<CameraType,Camera> Cameras { get; }
 
@@ -61,10 +69,10 @@ namespace OpenpilotSdk.Hardware
                 : Environment.GetFolderPath(Environment.SpecialFolder.Personal),
             "opensshkey");
 
-        private static IPrivateKeySource[] _privateKeys =
-        [
-            new PrivateKeyFile(PrivateSshKeyFile)
-        ];
+        private static IPrivateKeySource[] _privateKeys = LoadPrivateKeys();
+
+        private static IPrivateKeySource[] LoadPrivateKeys() =>
+            File.Exists(PrivateSshKeyFile) ? [new PrivateKeyFile(PrivateSshKeyFile)] : [];
 
         public string WorkingDirectory
         {
@@ -924,10 +932,7 @@ namespace OpenpilotSdk.Hardware
 
         public static async IAsyncEnumerable<OpenpilotDevice> DiscoverAsync()
         {
-            _privateKeys =
-            [
-                new PrivateKeyFile(PrivateSshKeyFile)
-            ];
+            _privateKeys = LoadPrivateKeys();
             
             var connectionRequests = new List<Task<OpenpilotDevice?>>();
 
@@ -935,7 +940,7 @@ namespace OpenpilotSdk.Hardware
             var discoveredDevices = new ConcurrentQueue<OpenpilotDevice>();
             var scannedHostSet = new HashSet<string>();
 
-            var discoveredDeviceInfoList = new List<DeviceInfo>();
+            var discoveredDeviceInfoList = new ConcurrentQueue<DeviceInfo>();
 
             try
             {
@@ -975,7 +980,7 @@ namespace OpenpilotSdk.Hardware
                         var openpilotDevice = await completed.ConfigureAwait(false);
                         if (openpilotDevice != null)
                         {
-                            discoveredDeviceInfoList.Add(new DeviceInfo() { Hostname = openpilotDevice.HostName, IpAddress = openpilotDevice.IpAddress != null ? openpilotDevice.IpAddress.ToString() : "", LastSeen = DateTime.UtcNow });
+                            discoveredDeviceInfoList.Enqueue(new DeviceInfo() { Hostname = openpilotDevice.HostName, IpAddress = openpilotDevice.IpAddress != null ? openpilotDevice.IpAddress.ToString() : "", LastSeen = DateTime.UtcNow });
                             yield return openpilotDevice;
                         }
                         connectionRequests.Remove(completed);
@@ -1061,7 +1066,7 @@ namespace OpenpilotSdk.Hardware
                                         ipAddress = firstIpV4;
                                     }
 
-                                    discoveredDeviceInfoList.Add(new DeviceInfo() { Hostname = host, IpAddress = ipAddress != null ? ipAddress.ToString() : "", LastSeen = DateTime.UtcNow });
+                                    discoveredDeviceInfoList.Enqueue(new DeviceInfo() { Hostname = host, IpAddress = ipAddress != null ? ipAddress.ToString() : "", LastSeen = DateTime.UtcNow });
                                     if (ipAddress != null)
                                     {
                                         discoveredDevices.Enqueue(new Comma3(ipAddress, host, false));
@@ -1137,17 +1142,8 @@ namespace OpenpilotSdk.Hardware
                 }
 
                 //Return IP scanned devices and discovery devices
-                var timeout = TimeSpan.FromSeconds(10);
-                var cts = new CancellationTokenSource(timeout);
-                await foreach (var connectionRequest in Task.WhenEach(connectionRequests).WithCancellation(cts.Token).ConfigureAwait(false))
+                await foreach (var connectionRequest in Task.WhenEach(connectionRequests).ConfigureAwait(false))
                 {
-                    if (!cts.TryReset())
-                    {
-                        cts.Token.ThrowIfCancellationRequested();
-                    }
-
-                    cts.CancelAfter(Timeout.Infinite);
-
                     while (discoveredDevices.Count > 0)
                     {
                         if (discoveredDevices.TryDequeue(out var device))
@@ -1159,12 +1155,9 @@ namespace OpenpilotSdk.Hardware
                     var openpilotDevice = await connectionRequest.ConfigureAwait(false);
                     if (openpilotDevice != null)
                     {
-                        discoveredDeviceInfoList.Add(new DeviceInfo() { Hostname = openpilotDevice.HostName, IpAddress = openpilotDevice.IpAddress != null ? openpilotDevice.IpAddress.ToString() : "", LastSeen = DateTime.UtcNow });
+                        discoveredDeviceInfoList.Enqueue(new DeviceInfo() { Hostname = openpilotDevice.HostName, IpAddress = openpilotDevice.IpAddress != null ? openpilotDevice.IpAddress.ToString() : "", LastSeen = DateTime.UtcNow });
                         yield return openpilotDevice;
                     }
-
-                    //Reset the 10 second limit between responses
-                    cts.CancelAfter(timeout);
                 }
 
                 var discoveryTimeout = TimeSpan.FromSeconds(1);
@@ -1219,14 +1212,14 @@ namespace OpenpilotSdk.Hardware
                         socket.NoDelay = true;
                         socket.DontFragment = true;
 
-                        var cts = new CancellationTokenSource(timeout);
-                        var socketTask = socket.ConnectAsync(host, port, cts.Token);
-
-                        await Task.WhenAny(Task.Delay(timeout), socketTask.AsTask()).ConfigureAwait(false);
-
-                        if (!socket.Connected)
+                        using var cts = new CancellationTokenSource(timeout);
+                        try
                         {
-                            if (i >= SshPorts.Length-1)
+                            await socket.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            if (i >= SshPorts.Length - 1)
                             {
                                 return null;
                             }
@@ -1268,7 +1261,7 @@ namespace OpenpilotSdk.Hardware
                     hostName = host;
                 }
 
-                if (hostName != null && (hostName.StartsWith("comma") || hostName.Equals("tici")))
+                if (hostName != null && (hostName.StartsWith("comma") || hostName is "tici" or "tizi"))
                 {
                     Log.Information("Connected to Comma3 device at {Address} on port {port}",
                         host, port);
@@ -1283,7 +1276,8 @@ namespace OpenpilotSdk.Hardware
 
                 try
                 {
-                    await sshClient.ConnectAsync(CancellationToken.None);
+                    using var sshCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await sshClient.ConnectAsync(sshCts.Token).ConfigureAwait(false);
                 }
                 catch (SshAuthenticationException)
                 {
@@ -1304,7 +1298,7 @@ namespace OpenpilotSdk.Hardware
                     using (var command = sshClient.CreateCommand("cat /sys/firmware/devicetree/base/model"))
                     {
                         hostName = await Task.Factory.FromAsync(command.BeginExecute(), command.EndExecute).ConfigureAwait(false);
-                        if (hostName != null && (hostName.StartsWith("comma") || hostName.Equals("tici")))
+                        if (hostName != null && (hostName.StartsWith("comma") || hostName is "tici" or "tizi"))
                         {
                             Log.Information("Connected to Comma3 device at {Host} on port {port}",
                                 host, port);
@@ -1341,17 +1335,13 @@ namespace OpenpilotSdk.Hardware
                 var success = command.ExitStatus == 0;
                 if (success)
                 {
-                    var results = result.Split("\n");
-                    var username = results[0].Split("/")[3];
-                    var branch = results[1];
-                    if (progress == null)
+                    var results = result.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    if (results.Length < 2 || results[0].Split('/', ':') is not { Length: >= 2 } urlParts)
                     {
-                        return await InstallForkAsync(username, branch).ConfigureAwait(false);
+                        return new ForkResult("Could not parse current openpilot remote: " + result, false);
                     }
-                    else
-                    {
-                        return await InstallForkAsync(username, branch, progress).ConfigureAwait(false);
-                    }
+                    var repository = urlParts[^1].EndsWith(".git") ? urlParts[^1][..^4] : urlParts[^1];
+                    return await InstallForkAsync(urlParts[^2], results[1], progress, repository).ConfigureAwait(false);
                 }
                 return new ForkResult(string.IsNullOrWhiteSpace(result) ? command.Error : result, false);
             }
@@ -1421,8 +1411,11 @@ namespace OpenpilotSdk.Hardware
 
             await ConnectSshAsync().ConfigureAwait(false);
 
-            var installCommand =
-                string.Format(GitCloneCommand, username, branch, repository);
+            var installCommand = BuildInstallCommand(username, branch, repository);
+            if (installCommand == null)
+            {
+                return new ForkResult("Invalid fork username, repository or branch name.", false);
+            }
 
             var progressRegex = new Regex(@"\d+(?=%)", RegexOptions.Compiled);
             int previousProgress = 0;
@@ -1478,13 +1471,16 @@ namespace OpenpilotSdk.Hardware
         {
             await ConnectSshAsync().ConfigureAwait(false);
 
-            var installCommand =
-                string.Format(GitCloneCommand, username, branch, repository);
-            
+            var installCommand = BuildInstallCommand(username, branch, repository);
+            if (installCommand == null)
+            {
+                return new ForkResult("Invalid fork username, repository or branch name.", false);
+            }
+
             using (var command = SshClient.CreateCommand(installCommand))
             {
                 var result = await Task.Factory.FromAsync(command.BeginExecute(), command.EndExecute).ConfigureAwait(false);
-                var success = command.ExitStatus == 0 || !(string.IsNullOrWhiteSpace(result) && !string.IsNullOrWhiteSpace(command.Error));
+                var success = command.ExitStatus == 0;
 
                 if (success)
                 {
@@ -1526,6 +1522,8 @@ namespace OpenpilotSdk.Hardware
                 {
                     var connectionInfo = new ConnectionInfo(IpAddress.ToString(), Port, "comma", new PrivateKeyAuthenticationMethod("comma", _privateKeys));
 
+                    SftpClient?.Dispose();
+                    SshClient?.Dispose();
                     SftpClient = new SftpClient(connectionInfo)
                     {
                         KeepAliveInterval = TimeSpan.FromSeconds(10)
@@ -1564,6 +1562,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
+                        SftpClient?.Dispose();
                         SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
@@ -1601,6 +1600,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SshClient == null || !SshClient.IsConnected)
                     {
+                        SshClient?.Dispose();
                         SshClient = new SshClient(host, Port, "comma", _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
@@ -1639,6 +1639,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SshClient == null || !SshClient.IsConnected)
                     {
+                        SshClient?.Dispose();
                         SshClient = new SshClient(host, Port, "comma", _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
@@ -1648,6 +1649,7 @@ namespace OpenpilotSdk.Hardware
 
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
+                        SftpClient?.Dispose();
                         SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)

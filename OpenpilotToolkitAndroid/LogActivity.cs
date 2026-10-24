@@ -6,7 +6,7 @@ using AndroidX.AppCompat.App;
 using AndroidX.Core.View;
 using AndroidX.DrawerLayout.Widget;
 using Google.Android.Material.Navigation;
-using Xamarin.Essentials;
+using Microsoft.Maui.ApplicationModel;
 
 namespace OpenpilotToolkitAndroid
 {
@@ -19,7 +19,7 @@ namespace OpenpilotToolkitAndroid
 
             AppCompatDelegate.DefaultNightMode = AppCompatDelegate.ModeNightYes;
 
-            Xamarin.Essentials.Platform.Init(this, savedInstanceState);
+            Platform.Init(this, savedInstanceState);
 
             SetContentView(Resource.Layout.activity_log);
 

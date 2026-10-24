@@ -19,7 +19,7 @@ using Serilog;
 using Serilog.Core;
 using System.Linq;
 using System.Net;
-using Xamarin.Essentials;
+using Microsoft.Maui.ApplicationModel;
 using Environment = System.Environment;
 using Toolbar = AndroidX.AppCompat.Widget.Toolbar;
 

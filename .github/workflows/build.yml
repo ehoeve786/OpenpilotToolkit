@@ -45,7 +45,7 @@ jobs:
       - name: Install Cap'n Proto and Android workload
         run: |
           sudo apt-get install -y -qq capnproto
-          dotnet workload install android
+          dotnet workload restore OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj
 
       - name: Build APK
         run: dotnet publish OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj -c Release -f net10.0-android -p:Platform=ARM64 -p:AndroidSdkDirectory="$ANDROID_HOME" -o apk 2>&1 | tee build.log

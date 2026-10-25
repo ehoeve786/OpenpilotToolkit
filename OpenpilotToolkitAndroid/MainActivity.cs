@@ -277,7 +277,8 @@ namespace OpenpilotToolkitAndroid
                     await MainThread.InvokeOnMainThreadAsync(() =>
                     {
                         Android.Views.View view = FindViewById(Android.Resource.Id.Content);
-                        var snack = Snackbar.Make(view, $"{discoveredDevices.Count} device(s) found but authentication failed, click to start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
+                        var hostList = string.Join(", ", discoveredDevices.Select(d => d.IpAddress.ToString()));
+                        var snack = Snackbar.Make(view, $"SSH accepted none of the toolkit key on: {hostList}. If one is your openpilot device, start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
                         snack.SetAction("SSH Wizard", (view) =>
                         {
                             var sshActivity = new Intent(this, typeof(SshActivity));

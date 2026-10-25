@@ -277,15 +277,17 @@ namespace OpenpilotToolkitAndroid
                     await MainThread.InvokeOnMainThreadAsync(() =>
                     {
                         Android.Views.View view = FindViewById(Android.Resource.Id.Content);
-                        var hostList = string.Join(", ", discoveredDevices.Select(d => d.IpAddress.ToString()));
-                        var snack = Snackbar.Make(view, $"SSH accepted none of the toolkit key on: {hostList}. If one is your openpilot device, start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
-                        snack.SetAction("SSH Wizard", (view) =>
-                        {
-                            var sshActivity = new Intent(this, typeof(SshActivity));
-                            StartActivity(sshActivity);
-                            OverridePendingTransition(Android.Resource.Animation.SlideInLeft, Android.Resource.Animation.FadeOut);
-                        });
-                        snack.Show();
+                        var hostList = string.Join("\n", discoveredDevices.Select(d => d.IpAddress.ToString()));
+                        new Android.App.AlertDialog.Builder(this)
+                            .SetTitle("SSH accepted none of the toolkit key")
+                            .SetMessage($"Hosts tried:\n{hostList}\n\nIf one is your openpilot device, open the SSH wizard.")
+                            .SetPositiveButton("SSH Wizard", (sender, args) =>
+                            {
+                                StartActivity(new Intent(this, typeof(SshActivity)));
+                                OverridePendingTransition(Android.Resource.Animation.SlideInLeft, Android.Resource.Animation.FadeOut);
+                            })
+                            .SetNegativeButton("OK", (sender, args) => { })
+                            .Show();
                     });
 
                     //await ShowToastOnMainThreadAsync(

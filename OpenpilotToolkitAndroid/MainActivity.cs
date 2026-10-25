@@ -76,6 +76,11 @@ namespace OpenpilotToolkitAndroid
 
         protected override async void OnCreate(Bundle? savedInstanceState)
         {
+            //Crash report readable without root: Android/data/<package>/files/crash.txt
+            var crashFile = Path.Combine(GetExternalFilesDir(null)!.AbsolutePath, "crash.txt");
+            AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => File.WriteAllText(crashFile, e.Exception.ToString());
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => File.WriteAllText(crashFile, e.ExceptionObject.ToString());
+
             base.OnCreate(savedInstanceState);
             var personalFolder = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
             if (!Directory.Exists(personalFolder))

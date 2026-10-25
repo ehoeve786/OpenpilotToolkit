@@ -22,12 +22,4 @@
     <Build Solution="*|x64" Project="false" />
     <Deploy Solution="*|ARM64" />
   </Project>
-  <Project Path="SSH.NET/src/Renci.SshNet/Renci.SshNet.csproj">
-    <Platform Solution="*|ARM64" Project="ARM64" />
-    <Platform Solution="*|x64" Project="x64" />
-  </Project>
-  <Project Path="SshNet.Keygen/SshNet.Keygen/SshNet.Keygen.csproj">
-    <Platform Solution="*|ARM64" Project="ARM64" />
-    <Platform Solution="*|x64" Project="x64" />
-  </Project>
 </Solution>

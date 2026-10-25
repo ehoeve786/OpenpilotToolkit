@@ -49,8 +49,6 @@ OpenpilotToolkit/
 ├── OpenpilotToolkit/         # Main application (WinForms)
 ├── OpenpilotSdk/             # SDK with Cap'n Proto schemas (*.capnp files)
 ├── MaterialSkin/             # Material Design UI components
-├── SSH.NET/                  # SSH library (git submodule)
-├── SshNet.Keygen/            # SSH key generation
 ├── OpenpilotToolkitAndroid/  # Android version (skip for desktop builds)
 └── agents.md                 # This file
 ```
@@ -66,7 +64,7 @@ OpenpilotToolkit/
 
 ### Project Build Order (Dependency Chain)
 ```
-SSH.NET → SshNet.Keygen → OpenpilotSdk → MaterialSkin → OpenpilotToolkit
+OpenpilotSdk → MaterialSkin → OpenpilotToolkit
 ```
 (Scripts handle this automatically)
 
@@ -91,7 +89,7 @@ sudo apt-get install capnproto libcapnp-dev
 **Cause**: .NET Framework package compatibility warnings  
 **Impact**: None - packages work fine with .NET 10
 
-### Issue: SSH.NET not found
+### Issue: MaterialSkin not found
 **Cause**: Git submodule not initialized  
 **Fix**:
 ```bash

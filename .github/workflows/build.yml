@@ -14,15 +14,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  android-app:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Setup and build
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Cap'n Proto and Android workload
         run: |
-          bash .agent/setup.sh
-          bash .agent/quick-build.sh
+          sudo apt-get install -y -qq capnproto
+          dotnet workload restore OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj
+
+      - name: Build APK
+        run: dotnet publish OpenpilotToolkitAndroid/OpenpilotToolkitAndroid.csproj -c Release -f net10.0-android -p:Platform=ARM64 -p:AndroidSdkDirectory="$ANDROID_HOME" -o apk 2>&1 | tee build.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenpilotToolkitAndroid-apk
+          path: apk/*-Signed.apk
+          if-no-files-found: error
+
+      - name: Annotate build errors
+        if: failure()
+        run: |
+          grep -E ': error [A-Z]+[0-9]+' build.log | sort -u | head -50 | sed 's/^/::error::/' || true

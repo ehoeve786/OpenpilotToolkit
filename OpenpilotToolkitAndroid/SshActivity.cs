@@ -14,7 +14,7 @@ using Serilog.Core;
 using SshNet.Keygen;
 using SshNet.Keygen.Extensions;
 using System.Text;
-using Xamarin.Essentials;
+using Microsoft.Maui.ApplicationModel;
 using Toolbar = AndroidX.AppCompat.Widget.Toolbar;
 
 namespace OpenpilotToolkitAndroid
@@ -42,7 +42,7 @@ namespace OpenpilotToolkitAndroid
             
             AppCompatDelegate.DefaultNightMode = AppCompatDelegate.ModeNightYes;
 
-            Xamarin.Essentials.Platform.Init(this, savedInstanceState);
+            Platform.Init(this, savedInstanceState);
             
             SetContentView(Resource.Layout.activity_ssh);
 

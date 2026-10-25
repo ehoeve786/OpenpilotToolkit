@@ -5,7 +5,7 @@
  
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <Optimize>true</Optimize>
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRun Condition="!$(TargetFramework.Contains('-android'))">true</PublishReadyToRun>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

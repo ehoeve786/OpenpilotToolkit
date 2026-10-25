@@ -38,6 +38,8 @@ namespace OpenpilotSdk.Hardware
         public bool IsAuthenticated { get; protected set; } = false;
         protected readonly string TempDirectory = Path.Combine(AppContext.BaseDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Personal), "tmp");
         public virtual int Port { get; set; } = 22;
+        public string SshUser { get; set; } = "comma";
+        private static readonly string[] KnownSshUsers = ["comma", "iq"]; //iq = IQ.Pilot
         public IPAddress IpAddress { get; init; }
         public string HostName { get; init; }
 
@@ -340,7 +342,7 @@ namespace OpenpilotSdk.Hardware
                         {
                             if (Directory.Exists(Path.GetDirectoryName(path)))
                             {
-                                using (var sftpClient = new SftpClient(IpAddress.ToString(), "comma", _privateKeys))
+                                using (var sftpClient = new SftpClient(IpAddress.ToString(), SshUser, _privateKeys))
                                 {
                                     sftpClient.KeepAliveInterval = TimeSpan.FromSeconds(10);
                                     await _maxConcurrentConnectionLock.WaitAsync().ConfigureAwait(false);
@@ -1067,10 +1069,6 @@ namespace OpenpilotSdk.Hardware
                                     }
 
                                     discoveredDeviceInfoList.Enqueue(new DeviceInfo() { Hostname = host, IpAddress = ipAddress != null ? ipAddress.ToString() : "", LastSeen = DateTime.UtcNow });
-                                    if (ipAddress != null)
-                                    {
-                                        discoveredDevices.Enqueue(new Comma3(ipAddress, host, false));
-                                    }
                                 }, CancellationToken.None, new NetworkInterface[] { networkInterface }));
                             }
                         }
@@ -1085,15 +1083,17 @@ namespace OpenpilotSdk.Hardware
                         }
                         var endAddress = ~BitConverter.ToUInt32(subnetMask, 0);
 
-                        if (endAddress > 1024)
-                        {
-                            Log.Information("Subnet contains more than 1024 addresses, skipping: {interface}.  End Address: {address}", networkInterface.Name, endAddress);
-                            continue;
-                        }
-
                         var localIp = BitConverter.ToUInt32(ipAddress, 0);
 
-                        var startAddress = BitConverter.ToUInt32(ipAddress, 0) & BitConverter.ToUInt32(subnetMask, 0);
+                        var startAddress = localIp & BitConverter.ToUInt32(subnetMask, 0);
+
+                        //Large subnet (e.g. a /16 hotspot): scan the local /24 so nearby devices are still found
+                        if (endAddress > 1024)
+                        {
+                            Log.Information("Subnet contains more than 1024 addresses, scanning local /24 only: {interface}", networkInterface.Name);
+                            startAddress = localIp & 0xFFFFFF00;
+                            endAddress = 255;
+                        }
 
                         var startAddressBytes = BitConverter.GetBytes(startAddress + 1);
                         if (BitConverter.IsLittleEndian) Array.Reverse(startAddressBytes);
@@ -1104,7 +1104,6 @@ namespace OpenpilotSdk.Hardware
                             if (scannedHostSet.Add(startIPAddress))
                             {
                                 connectionRequests.Add(GetOpenpilotDeviceAsync(startIPAddress));
-                                continue;
                             }
                         }
 
@@ -1261,33 +1260,32 @@ namespace OpenpilotSdk.Hardware
                     hostName = host;
                 }
 
-                if (hostName != null && (hostName.StartsWith("comma") || hostName is "tici" or "tizi"))
+                //~174.320 ms per attempt
+                SshClient? sshClient = null;
+                string sshUser = "";
+                foreach (var user in KnownSshUsers)
                 {
-                    Log.Information("Connected to Comma3 device at {Address} on port {port}",
-                        host, port);
-                    return new Comma3(ipAddress, hostName, false);
+                    var candidate = new SshClient(host, port, user, _privateKeys)
+                    {
+                        KeepAliveInterval = TimeSpan.FromSeconds(10)
+                    };
+                    try
+                    {
+                        using var sshCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await candidate.ConnectAsync(sshCts.Token).ConfigureAwait(false);
+                        sshClient = candidate;
+                        sshUser = user;
+                        break;
+                    }
+                    catch (SshAuthenticationException)
+                    {
+                        candidate.Dispose();
+                    }
                 }
-                
-                //~174.320 ms
-                var sshClient = new SshClient(host, port, "comma", _privateKeys)
-                {
-                    KeepAliveInterval = TimeSpan.FromSeconds(10)
-                };
 
-                try
+                if (sshClient is null || !sshClient.IsConnected)
                 {
-                    using var sshCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await sshClient.ConnectAsync(sshCts.Token).ConfigureAwait(false);
-                }
-                catch (SshAuthenticationException)
-                {
-                    sshClient.Dispose();
-                    return new UnknownDevice(ipAddress, hostName);
-                }
-
-                if (!sshClient.IsConnected)
-                {
-                    sshClient.Dispose();
+                    sshClient?.Dispose();
                     return new UnknownDevice(ipAddress, hostName);
                 }
 
@@ -1303,12 +1301,12 @@ namespace OpenpilotSdk.Hardware
                             Log.Information("Connected to Comma3 device at {Host} on port {port}",
                                 host, port);
 
-                            return new Comma3(ipAddress, hostName) { SshClient = sshClient };
+                            return new Comma3(ipAddress, hostName) { SshClient = sshClient, SshUser = sshUser };
                         }
                         else
                         {
                             Log.Information("Connected to Comma2 device at {Host} on port {port}", host, port);
-                            return new Comma2(ipAddress) { SshClient = sshClient };
+                            return new Comma2(ipAddress) { SshClient = sshClient, SshUser = sshUser };
                         }
                     }
                 }
@@ -1426,9 +1424,9 @@ namespace OpenpilotSdk.Hardware
                 var asyncResult = command.BeginExecute();
                 using (var streamReader = new StreamReader(command.ExtendedOutputStream))
                 {
-                    while (!asyncResult.IsCompleted)
+                    //Stream ends when the command's channel closes, so this exits without spinning
+                    while (await streamReader.ReadLineAsync().ConfigureAwait(false) is { } output)
                     {
-                        var output = await streamReader.ReadLineAsync().ConfigureAwait(false);
                         if (!string.IsNullOrWhiteSpace(output))
                         {
                             lastLineRead = output;
@@ -1441,9 +1439,7 @@ namespace OpenpilotSdk.Hardware
                                     if (previousProgress != currentProgress)
                                     {
                                         previousProgress = currentProgress;
-                                        var progressText = output.Substring(0, match.Index).Trim();
-                                        progressText = progressText.Remove(progressText.Length - 1);
-                                        progress.Report(new InstallProgress(currentProgress, progressText));
+                                        progress.Report(new InstallProgress(currentProgress, output[..match.Index].Trim().TrimEnd(':')));
                                     }
                                 }
                             }
@@ -1520,7 +1516,7 @@ namespace OpenpilotSdk.Hardware
             {
                 if (SftpClient == null || !SftpClient.IsConnected)
                 {
-                    var connectionInfo = new ConnectionInfo(IpAddress.ToString(), Port, "comma", new PrivateKeyAuthenticationMethod("comma", _privateKeys));
+                    var connectionInfo = new ConnectionInfo(IpAddress.ToString(), Port, SshUser, new PrivateKeyAuthenticationMethod(SshUser, _privateKeys));
 
                     SftpClient?.Dispose();
                     SshClient?.Dispose();
@@ -1563,7 +1559,7 @@ namespace OpenpilotSdk.Hardware
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
                         SftpClient?.Dispose();
-                        SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
+                        SftpClient = new SftpClient(host, Port, SshUser, _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1601,7 +1597,7 @@ namespace OpenpilotSdk.Hardware
                     if (SshClient == null || !SshClient.IsConnected)
                     {
                         SshClient?.Dispose();
-                        SshClient = new SshClient(host, Port, "comma", _privateKeys)
+                        SshClient = new SshClient(host, Port, SshUser, _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1640,7 +1636,7 @@ namespace OpenpilotSdk.Hardware
                     if (SshClient == null || !SshClient.IsConnected)
                     {
                         SshClient?.Dispose();
-                        SshClient = new SshClient(host, Port, "comma", _privateKeys)
+                        SshClient = new SshClient(host, Port, SshUser, _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1650,7 +1646,7 @@ namespace OpenpilotSdk.Hardware
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
                         SftpClient?.Dispose();
-                        SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
+                        SftpClient = new SftpClient(host, Port, SshUser, _privateKeys)
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };

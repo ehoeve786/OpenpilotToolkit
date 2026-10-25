@@ -19,7 +19,7 @@ using Serilog;
 using Serilog.Core;
 using System.Linq;
 using System.Net;
-using Xamarin.Essentials;
+using Microsoft.Maui.ApplicationModel;
 using Environment = System.Environment;
 using Toolbar = AndroidX.AppCompat.Widget.Toolbar;
 
@@ -76,6 +76,11 @@ namespace OpenpilotToolkitAndroid
 
         protected override async void OnCreate(Bundle? savedInstanceState)
         {
+            //Crash report in shared Documents (app-owned file, no permission needed on Android 11+)
+            var crashFile = Path.Combine(Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDocuments)!.AbsolutePath, "OpenpilotToolkit-crash.txt");
+            AndroidEnvironment.UnhandledExceptionRaiser += (_, e) => File.WriteAllText(crashFile, e.Exception.ToString());
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => File.WriteAllText(crashFile, e.ExceptionObject.ToString());
+
             base.OnCreate(savedInstanceState);
             var personalFolder = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
             if (!Directory.Exists(personalFolder))
@@ -272,14 +277,17 @@ namespace OpenpilotToolkitAndroid
                     await MainThread.InvokeOnMainThreadAsync(() =>
                     {
                         Android.Views.View view = FindViewById(Android.Resource.Id.Content);
-                        var snack = Snackbar.Make(view, $"{discoveredDevices.Count} device(s) found but authentication failed, click to start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
-                        snack.SetAction("SSH Wizard", (view) =>
-                        {
-                            var sshActivity = new Intent(this, typeof(SshActivity));
-                            StartActivity(sshActivity);
-                            OverridePendingTransition(Android.Resource.Animation.SlideInLeft, Android.Resource.Animation.FadeOut);
-                        });
-                        snack.Show();
+                        var hostList = string.Join("\n", discoveredDevices.Select(d => d.IpAddress.ToString()));
+                        new Android.App.AlertDialog.Builder(this)
+                            .SetTitle("SSH accepted none of the toolkit key")
+                            .SetMessage($"Hosts tried:\n{hostList}\n\nIf one is your openpilot device, open the SSH wizard.")
+                            .SetPositiveButton("SSH Wizard", (sender, args) =>
+                            {
+                                StartActivity(new Intent(this, typeof(SshActivity)));
+                                OverridePendingTransition(Android.Resource.Animation.SlideInLeft, Android.Resource.Animation.FadeOut);
+                            })
+                            .SetNegativeButton("OK", (sender, args) => { })
+                            .Show();
                     });
 
                     //await ShowToastOnMainThreadAsync(

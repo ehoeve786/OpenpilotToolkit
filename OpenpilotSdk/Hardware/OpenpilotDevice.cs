@@ -1083,15 +1083,17 @@ namespace OpenpilotSdk.Hardware
                         }
                         var endAddress = ~BitConverter.ToUInt32(subnetMask, 0);
 
-                        if (endAddress > 1024)
-                        {
-                            Log.Information("Subnet contains more than 1024 addresses, skipping: {interface}.  End Address: {address}", networkInterface.Name, endAddress);
-                            continue;
-                        }
-
                         var localIp = BitConverter.ToUInt32(ipAddress, 0);
 
-                        var startAddress = BitConverter.ToUInt32(ipAddress, 0) & BitConverter.ToUInt32(subnetMask, 0);
+                        var startAddress = localIp & BitConverter.ToUInt32(subnetMask, 0);
+
+                        //Large subnet (e.g. a /16 hotspot): scan the local /24 so nearby devices are still found
+                        if (endAddress > 1024)
+                        {
+                            Log.Information("Subnet contains more than 1024 addresses, scanning local /24 only: {interface}", networkInterface.Name);
+                            startAddress = localIp & 0xFFFFFF00;
+                            endAddress = 255;
+                        }
 
                         var startAddressBytes = BitConverter.GetBytes(startAddress + 1);
                         if (BitConverter.IsLittleEndian) Array.Reverse(startAddressBytes);
